@@ -123,7 +123,7 @@
     + `AT!RESET`
 ---
 ### Bypass Lenovo Whitelist for T470/Carbon X1 G6 and other newer Lenovo laptops
-Note: [Use a $10 M.2 USB Adapter to flash and configure the modem](https://www.ebay.com/sch/i.html?_from=R40&_nkw=ngff+sim+usb&_sacat=0&_sop=15)
+Note: [Use a $10 M.2 USB Adapter to flash and configure the modem](https://amzn.to/3ly87mD)
 1. Enable Advanced Commands:
     + `AT!ENTERCND="A710"`
 2. Do not skip full initialization on cold boots.
