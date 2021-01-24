@@ -3,15 +3,15 @@
 #
 #.USAGE
 # To start, run:
-# wget https://raw.githubusercontent.com/oleteacher/sierra-wireless-modems/master/autoflash-7455.sh && sudo bash autoflash-7455.sh
+# wget https://raw.githubusercontent.com/danielewood/sierra-wireless-modems/master/autoflash-7455.sh && sudo bash autoflash-7455.sh
 
 #.SYNOPSIS
-# - Only for use on Ubuntu 18 (Bionic) LiveUSB
+# - Only for use on Ubuntu 18.04 (or later) LiveUSB
 # - Changes all models of EM7455/MC7455 Modems to the Generic Sierra Wireless VID/PID
 # - Flashes the Current Generic Firmware
 
 #.DESCRIPTION
-# - Only for use on Ubuntu 18 (Bionic) LiveUSB
+# - Only for use on Ubuntu 18.04 (or later) LiveUSB
 # - All Needed Packages will Auto-Install
 # - Sets MBIM Mode with AT Commands Access
 # - Changes all models of EM74XX/MC74XX Modems to the Generic Sierra Wireless VID/PID
@@ -29,7 +29,7 @@
 # https://github.com/danielewood/sierra-wireless-modems
 
 #.VERSION
-# Version: 20200912
+# Version: 20201120
 
 ##################
 ### Pre-Checks ###
@@ -40,9 +40,8 @@ if [ "$EUID" -ne 0 ]
     exit
 fi
 
-lsbrelease=$(lsb_release -c | awk '{print $2}')
-if [ "$lsbrelease" != "bionic" ]
-    then echo "Please run on Ubuntu 18 (Bionic)"
+if [[ $(lsb_release -r | awk '{print ($2 >= "18.04")}') -eq 0 ]]; then 
+    echo "Please run on Ubuntu 18.04 (Bionic) or later"
     lsb_release -a
     exit
 fi
@@ -212,7 +211,20 @@ function get_modem_deviceid() {
     devpath=$(find /dev -maxdepth 1 -regex '/dev/cdc-wdm[0-9]' -o -regex '/dev/qcqmi[0-9]')
 }
 
+function get_modem_bootloader_deviceid() {
+    deviceid=''
+    while [ -z $deviceid ]
+    do
+        echo 'Waiting for modem in boothold mode...'
+        sleep 2
+        deviceid=$(lsusb | grep -i -E '1199:9070|1199:9078|413C:81B5' | awk '{print $6}')
+    done
+    echo "Found $deviceid"
+}
+
 function reset_modem {
+    get_modem_deviceid
+
     # Reset Modem
     printf "${CYAN}---${NC}\n"
     echo 'Reseting modem...'
@@ -328,7 +340,7 @@ function download_modem_firmware() {
 
     # Cleanup old CWE/NVUs
     rm -f ./*.cwe ./*.nvu 2>/dev/null
-    
+
     # Unzip SWI9X30C, force overwrite
     unzip -o "$SWI9X30C_ZIP"
 }
@@ -340,7 +352,9 @@ function flash_modem_firmware() {
     printf "${CYAN}---${NC}\n"
     echo "Flashing $SWI9X30C_CWE onto Generic Sierra Modem..."
     sleep 5
-    qmi-firmware-update --update -d "$deviceid" "$SWI9X30C_CWE" "$SWI9X30C_NVU"
+    qmi-firmware-update --reset -d "$deviceid"
+    get_modem_bootloader_deviceid
+    qmi-firmware-update --update-download -d "$deviceid" "$SWI9X30C_CWE" "$SWI9X30C_NVU"
     rc=$?
     if [[ $rc != 0 ]]
     then
@@ -356,6 +370,7 @@ function set_modem_settings() {
     # Set Generic Sierra Wireless VIDs/PIDs
     cat <<EOF > script.txt
 send AT
+sleep 1
 send ATE1
 sleep 1
 send ATI
@@ -432,15 +447,15 @@ function script_prechecks() {
     # Stop modem manager to prevent AT command spam and allow firmware-update
     printf "${CYAN}---${NC}\n"
     echo 'Stoping modem manager to prevent AT command spam and allow firmware-update, this may take a minute...'
-    systemctl stop ModemManager
-    systemctl disable ModemManager
+    systemctl stop ModemManager &>/dev/null
+    systemctl disable ModemManager &>/dev/null
 
     printf "${CYAN}---${NC}\n"
     echo "Installing all needed prerequisites..."
-    add-apt-repository universe 1>/dev/null
+    add-apt-repository universe -y 1>/dev/null
     apt update -y
     # need make and GCC for compiling perl modules
-    apt-get install make gcc curl minicom libqmi-glib5 libqmi-proxy libqmi-utils -y
+    apt-get install make gcc curl minicom libqmi-glib5 libqmi-proxy libqmi-utils unzip -y
     # Use cpan to install/compile all dependencies needed by swi_setusbcomp.pl
     yes | cpan install UUID::Tiny IPC::Shareable JSON
 
@@ -459,6 +474,27 @@ function set_swi_setusbcomp() {
     echo "Running Modem Mode Switch to usbcomp=$swi_usbcomp"
     ./swi_setusbcomp.pl --usbcomp=$swi_usbcomp --device="$devpath"
     reset_modem
+
+
+    # cat the serial port to monitor output and commands.
+    sudo cat /dev/"$ttyUSB" 2>&1 | tee -a modem.log &  
+
+    # Set Generic Sierra Wireless VIDs/PIDs
+    cat <<EOF > script.txt
+send AT
+sleep 1
+send AT!ENTERCND=\"A710\"
+sleep 1
+send AT!USBCOMP=$AT_USBCOMP
+sleep 1
+send AT!RESET
+! pkill cat
+sleep 1
+! pkill minicom
+EOF
+    sudo minicom -b 115200 -D /dev/"$ttyUSB" -S script.txt &>/dev/null
+
+   get_modem_deviceid
 }
 
 function script_cleanup() {
